@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { User, ConversationSummary, UserRow, ConversationRow } from '../types';
-import { Search, LogOut, Loader2, Camera, SlidersHorizontal, Star, X, Smile, Users, UserPlus } from 'lucide-react';
+import { Search, LogOut, Loader2, Camera, Settings, Star, X, Smile, Users, UserPlus, MoreVertical, Trash2, EyeOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../utils';
 import { supabase } from '../supabase';
@@ -14,6 +15,7 @@ interface SidebarProps {
   currentUser: User;
   activeConversation: ConversationSummary | null;
   onSelectConversation: (conv: ConversationSummary) => void;
+  onConversationDeleted: (convId: string) => void;
   onLogout: () => void;
   onlineUserIds: string[];
   onAvatarUpdate: (url: string) => void;
@@ -24,7 +26,7 @@ interface SidebarProps {
 }
 
 export function Sidebar({
-  currentUser, activeConversation, onSelectConversation, onLogout,
+  currentUser, activeConversation, onSelectConversation, onConversationDeleted, onLogout,
   onlineUserIds, onAvatarUpdate, unreadCounts,
   isMobile, mobileOpen, onMobileClose,
 }: SidebarProps) {
@@ -35,6 +37,10 @@ export function Sidebar({
   const [isSearching, setIsSearching] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [pinnedConvoIds, setPinnedConvoIds] = useState<Set<string>>(new Set());
+  const [hiddenConvoIds, setHiddenConvoIds] = useState<Set<string>>(new Set());
+  const [kebabConvoId, setKebabConvoId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
+  const kebabRef = useRef<HTMLDivElement>(null);
   const [hoveredConvoId, setHoveredConvoId] = useState<string | null>(null);
   const [editingStatus, setEditingStatus] = useState(false);
   const [statusEmoji, setStatusEmoji] = useState(currentUser.statusEmoji ?? '');
@@ -50,10 +56,13 @@ export function Sidebar({
   };
 
   const fetchConversations = async () => {
-    const { data: convs } = await supabase
-      .from('conversations').select('id, participants, updated_at, is_group, name, avatar_url, created_by')
-      .contains('participants', [currentUser.id])
-      .order('updated_at', { ascending: false });
+    const [{ data: convs }, { data: hiddenRows }] = await Promise.all([
+      supabase.from('conversations').select('id, participants, updated_at, is_group, name, avatar_url, created_by')
+        .contains('participants', [currentUser.id])
+        .order('updated_at', { ascending: false }),
+      supabase.from('hidden_conversations').select('conversation_id').eq('user_id', currentUser.id),
+    ]);
+    if (hiddenRows) setHiddenConvoIds(new Set((hiddenRows as { conversation_id: string }[]).map(r => r.conversation_id)));
     if (!convs?.length) { setConversations([]); return; }
 
     const rows = convs as ConversationRow[];
@@ -138,6 +147,15 @@ export function Sidebar({
     return () => clearTimeout(t);
   }, [searchQuery, currentUser.id]);
 
+	useEffect(() => {
+    if (!kebabConvoId) return;
+    const h = (e: MouseEvent) => {
+      if (kebabRef.current && !kebabRef.current.contains(e.target as Node)) setKebabConvoId(null);
+    };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, [kebabConvoId]);
+
   const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]; if (!file) return;
     if (file.size > 2 * 1024 * 1024) { alert('Image must be under 2MB'); return; }
@@ -165,6 +183,28 @@ export function Sidebar({
     }
   };
 
+  const hideConvo = async (e: React.MouseEvent, convId: string) => {
+    e.stopPropagation();
+    setKebabConvoId(null);
+    const { error } = await supabase.from('hidden_conversations').insert({
+      user_id: currentUser.id, conversation_id: convId,
+    });
+    if (error) console.warn('Failed to hide conversation:', error.message);
+    setHiddenConvoIds(prev => new Set(prev.add(convId)));
+  };
+
+  const confirmDeleteConvo = async () => {
+    if (!deleteTarget) return;
+    const id = deleteTarget.id;
+    setDeleteTarget(null);
+    const { error } = await supabase.from('conversations').delete().eq('id', id);
+    if (error) console.warn('Failed to delete conversation:', error.message);
+    setKebabConvoId(null);
+    setHiddenConvoIds(prev => { const s = new Set(prev); s.delete(id); return s; });
+    fetchConversations();
+    onConversationDeleted(id);
+  };
+
   const handleSelectSearchUser = (u: User) => {
     const chatId = [currentUser.id, u.id].sort().join('_');
     const existing = conversations.find(c => c.id === chatId);
@@ -180,9 +220,10 @@ export function Sidebar({
   };
 
   const query = searchQuery.trim().toLowerCase();
+  const visibleConversations = conversations.filter(c => !hiddenConvoIds.has(c.id));
   const filteredConversations = query
-    ? conversations.filter(c => c.name.toLowerCase().includes(query) || (c.subtitle ?? '').toLowerCase().includes(query))
-    : conversations;
+    ? visibleConversations.filter(c => c.name.toLowerCase().includes(query) || (c.subtitle ?? '').toLowerCase().includes(query))
+    : visibleConversations;
   const pinnedList = filteredConversations.filter(c => pinnedConvoIds.has(c.id));
   const unpinnedList = filteredConversations.filter(c => !pinnedConvoIds.has(c.id));
   const displayList = [...pinnedList, ...unpinnedList];
@@ -211,8 +252,15 @@ export function Sidebar({
           <div className="relative">
             <button onClick={() => setShowAppearance(v => !v)}
               className={cn('p-2 transition-colors rounded-xl liquid-icon', showAppearance ? 'text-[var(--accent)] border-[var(--accent)]/40' : 'text-[var(--txt3)] hover:text-[var(--txt)]')}
-              title={`Appearance: ${theme} mode`}><SlidersHorizontal className="w-4 h-4" /></button>
-            {showAppearance && <AppearanceMenu variant="dialog" onClose={() => setShowAppearance(false)} />}
+              title="Settings"><Settings className="w-4 h-4" /></button>
+            {showAppearance && (
+              <AppearanceMenu
+                variant="dialog"
+                onClose={() => setShowAppearance(false)}
+                currentUser={currentUser}
+                onOpenConversation={conv => { setShowAppearance(false); onSelectConversation(conv); }}
+              />
+            )}
           </div>
           <button onClick={onLogout}
             className="p-2 text-[var(--txt3)] transition-colors rounded-xl liquid-icon hover:text-[var(--accent)] hover:border-[var(--accent)]/35"
@@ -253,7 +301,7 @@ export function Sidebar({
               {searchQuery.trim() ? 'No matching chats' : 'No chats yet'}
             </div>
           ) : (
-            displayList.map(c => {
+            displayList.map((c, i) => {
               const isActive = activeConversation?.id === c.id;
               const isOnline = !c.isGroup && c.partner ? onlineUserIds.includes(c.partner.id) : false;
               const onlineMemberCount = c.isGroup
@@ -267,7 +315,7 @@ export function Sidebar({
               return (
                 <button
                   key={c.id}
-                  onClick={() => onSelectConversation(c)}
+                  onClick={() => { setKebabConvoId(null); onSelectConversation(c); }}
                   onMouseEnter={() => setHoveredConvoId(c.id)}
                   onMouseLeave={() => setHoveredConvoId(null)}
                   className={cn(
@@ -316,10 +364,54 @@ export function Sidebar({
                         className={cn('w-6 h-6 rounded flex items-center justify-center transition-colors',
                           isPinned ? 'text-yellow-400 hover:text-yellow-300' : 'text-[var(--txt3)] hover:text-yellow-400'
                         )}
-                        title={isPinned ? 'Unpin' : 'Pin conversation'}
+                        title={isPinned ? 'Remove from favourites' : 'Favourite'}
                       >
                         <Star className={cn('w-3.5 h-3.5', isPinned ? 'fill-yellow-400' : '')} />
                       </button>
+                    )}
+                    {(isHov || isMobile) && (
+                      <div
+                        ref={el => { if (kebabConvoId === c.id) kebabRef.current = el; }}
+                        className="relative"
+                      >
+                        <button
+                          onClick={e => { e.stopPropagation(); setKebabConvoId(prev => prev === c.id ? null : c.id); }}
+                          className={cn('w-6 h-6 rounded flex items-center justify-center transition-colors',
+                            kebabConvoId === c.id ? 'text-[var(--txt)] bg-[var(--surface4)]' : 'text-[var(--txt3)] hover:text-[var(--txt)] hover:bg-[var(--surface4)]'
+                          )}
+                          title="More options"
+                          aria-label="More options for this chat"
+                        >
+                          <MoreVertical className="w-3.5 h-3.5" />
+                        </button>
+                        {kebabConvoId === c.id && (
+                          <div className={cn('absolute right-0 z-30 w-48 rounded-xl border border-[var(--border2)] bg-[var(--surface2)] p-1 shadow-2xl',
+                            i >= displayList.length - 2 ? 'bottom-full mb-1' : 'top-full mt-1')}
+                            style={{ background: 'color-mix(in srgb, var(--surface2) 96%, var(--bg-deep))', backdropFilter: 'blur(28px) saturate(150%)' }}>
+                            <button
+                              onClick={e => togglePinConvo(e, c.id)}
+                              className="w-full flex items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-[var(--txt2)] hover:bg-[var(--surface4)] hover:text-[var(--txt)] transition-colors"
+                            >
+                              <Star className={cn('w-3.5 h-3.5', isPinned ? 'text-yellow-400 fill-yellow-400' : '')} />
+                              {isPinned ? 'Remove from favourites' : 'Favourite'}
+                            </button>
+                            <button
+                              onClick={e => hideConvo(e, c.id)}
+                              className="w-full flex items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-[var(--txt2)] hover:bg-[var(--surface4)] hover:text-[var(--txt)] transition-colors"
+                            >
+                              <EyeOff className="w-3.5 h-3.5" />
+                              Hide conversation
+                            </button>
+                            <button
+                              onClick={e => { e.stopPropagation(); setKebabConvoId(null); setDeleteTarget({ id: c.id, name: c.name }); }}
+                              className="w-full flex items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-red-400 hover:bg-red-500/10 hover:text-red-300 transition-colors"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              Delete conversation
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     )}
                     {unread > 0 && (
                       <div className="min-w-[20px] h-5 px-1.5 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center shadow-[0_0_8px_rgba(239,68,68,0.4)]">
@@ -500,6 +592,29 @@ export function Sidebar({
           />
         )}
       </AnimatePresence>
+
+      {deleteTarget && createPortal(<>
+        <button className="fixed inset-0 z-[90] cursor-default bg-black/35 backdrop-blur-sm" onClick={() => setDeleteTarget(null)} aria-label="Cancel delete" />
+        <div role="alertdialog" aria-modal="true" aria-label="Delete conversation" className="appearance-menu fixed z-[100] left-1/2 top-1/2 w-[min(21rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 p-5">
+          <span className="grid h-9 w-9 place-items-center rounded-xl bg-red-500/15 text-red-400"><Trash2 className="h-4 w-4" /></span>
+          <h3 className="mt-3 text-base font-bold tracking-[-.02em] text-[var(--txt)]">Delete conversation?</h3>
+          <p className="mt-1.5 text-xs leading-relaxed text-[var(--txt3)]">
+            "{deleteTarget.name}" will be permanently deleted for everyone in it.
+            This can't be undone.
+
+          </p>
+          <div className="mt-5 flex justify-end gap-2">
+            <button onClick={() => setDeleteTarget(null)}
+              className="rounded-xl px-4 py-2 text-xs font-medium text-[var(--txt2)] hover:bg-[var(--surface4)] transition-colors">
+              Cancel
+            </button>
+            <button onClick={confirmDeleteConvo}
+              className="rounded-xl bg-red-500 px-4 py-2 text-xs font-semibold text-white hover:bg-red-400 transition-colors shadow-[0_8px_20px_rgba(239,68,68,0.35)]">
+              Delete
+            </button>
+          </div>
+        </div>
+      </>, document.body)}
     </>
   );
 }

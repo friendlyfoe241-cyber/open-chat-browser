@@ -1,7 +1,10 @@
-import { Check, Moon, Palette, Sun, X } from 'lucide-react';
+import { Check, ChevronRight, EyeOff, Lock, Moon, Settings, Sun, X } from 'lucide-react';
 import { createPortal } from 'react-dom';
+import { useState } from 'react';
+import { ConversationSummary, User } from '../types';
 import { Accent, useTheme } from '../context/ThemeContext';
 import { cn } from '../utils';
+import { HiddenChatsModal } from './HiddenChatsModal';
 
 const accents: { id: Accent; name: string; colors: string }[] = [
   { id: 'aqua', name: 'Tidal', colors: 'from-[#6de7e2] to-[#3988ff]' },
@@ -14,12 +17,15 @@ const accents: { id: Accent; name: string; colors: string }[] = [
 interface AppearanceMenuProps {
   variant?: 'popover' | 'dialog';
   onClose?: () => void;
+  currentUser?: User | null;
+  onOpenConversation?: (conv: ConversationSummary) => void;
 }
 
-export function AppearanceMenu({ variant = 'popover', onClose }: AppearanceMenuProps) {
+export function AppearanceMenu({ variant = 'popover', onClose, currentUser, onOpenConversation }: AppearanceMenuProps) {
   const { theme, accent, setTheme, setAccent } = useTheme();
+  const [showHiddenChats, setShowHiddenChats] = useState(false);
   const content = <>
-    <div className="flex items-center gap-2 px-2 py-1.5"><Palette className="w-3.5 h-3.5 text-[var(--accent)]" /><span className="text-[11px] font-semibold tracking-[0.12em] uppercase text-[var(--txt2)]">Appearance</span>{variant === 'dialog' && <button onClick={onClose} className="ml-auto grid w-7 h-7 place-items-center rounded-lg text-[var(--txt3)] hover:bg-[var(--surface4)] hover:text-[var(--txt)]" aria-label="Close appearance settings"><X className="w-4 h-4" /></button>}</div>
+    <div className="flex items-center gap-2 px-2 py-1.5"><Settings className="w-3.5 h-3.5 text-[var(--accent)]" /><span className="text-[11px] font-semibold tracking-[0.12em] uppercase text-[var(--txt2)]">Settings</span>{variant === 'dialog' && <button onClick={onClose} className="ml-auto grid w-7 h-7 place-items-center rounded-lg text-[var(--txt3)] hover:bg-[var(--surface4)] hover:text-[var(--txt)]" aria-label="Close settings"><X className="w-4 h-4" /></button>}</div>
     <div className="mt-2 grid grid-cols-2 gap-1 rounded-2xl bg-[var(--inset)] p-1">
       {(['dark', 'light'] as const).map(option => {
         const active = theme === option; const Icon = option === 'dark' ? Moon : Sun;
@@ -31,12 +37,30 @@ export function AppearanceMenu({ variant = 'popover', onClose }: AppearanceMenuP
       const active = accent === item.id;
       return <button key={item.id} onClick={() => setAccent(item.id)} className={cn('w-full flex items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors', active ? 'bg-white/[0.08]' : 'hover:bg-white/[0.05]')}><span className={cn('w-7 h-7 rounded-full bg-gradient-to-br shadow-[inset_0_1px_rgba(255,255,255,.55),0_3px_8px_rgba(0,0,0,.14)]', item.colors)} /><span className="flex-1 text-xs font-medium text-[var(--txt)]">{item.name}</span>{active && <Check className="w-4 h-4 text-[var(--accent)]" />}</button>;
     })}</div>
+    {currentUser && onOpenConversation && (
+      <>
+        <div className="mt-4 px-2 flex items-center gap-1.5 text-[11px] font-semibold tracking-[0.12em] uppercase text-[var(--txt2)]"><Lock className="w-3 h-3" /> Hidden chats</div>
+        <button onClick={() => setShowHiddenChats(true)}
+          className="mt-1 w-full flex items-center gap-2.5 rounded-xl px-2 py-2 text-left transition-colors hover:bg-white/[0.05]">
+          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-[var(--surface4)] text-[var(--accent)]"><EyeOff className="w-3.5 h-3.5" /></span>
+          <span className="flex-1 min-w-0 text-xs font-medium text-[var(--txt)]">View hidden chats</span>
+          <ChevronRight className="w-3.5 h-3.5 shrink-0 text-[var(--txt3)]" />
+        </button>
+      </>
+    )}
   </>;
 
-  if (variant === 'dialog') return createPortal(<>
+  const hiddenModal = showHiddenChats && currentUser && onOpenConversation ? (
+    <HiddenChatsModal currentUser={currentUser} onClose={() => setShowHiddenChats(false)} onOpenConversation={onOpenConversation} />
+  ) : null;
+
+  const dialog = createPortal(<>
     <button className="fixed inset-0 z-[90] cursor-default bg-black/25 backdrop-blur-[2px]" onClick={onClose} aria-label="Close appearance settings" />
-    <div role="dialog" aria-modal="true" aria-label="Appearance settings" className="appearance-menu fixed z-[100] left-1/2 top-1/2 w-[min(23rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 p-4">{content}</div>
+    <div role="dialog" aria-modal="true" aria-label="Settings" className="appearance-menu fixed z-[100] left-1/2 top-1/2 w-[min(23rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 p-4">{content}</div>
+    {hiddenModal}
   </>, document.body);
 
-  return <div className="appearance-menu fixed inset-x-3 top-24 z-[70] w-auto p-3 sm:absolute sm:inset-x-auto sm:right-0 sm:top-[calc(100%+10px)] sm:w-72" style={{ background: 'color-mix(in srgb, var(--surface2) 93%, var(--bg-deep))', backdropFilter: 'blur(48px) saturate(150%)', WebkitBackdropFilter: 'blur(48px) saturate(150%)' }}>{content}</div>;
+  if (variant === 'dialog') return dialog;
+
+  return <><div className="appearance-menu fixed inset-x-3 top-24 z-[70] w-auto p-3 sm:absolute sm:inset-x-auto sm:right-0 sm:top-[calc(100%+10px)] sm:w-72" style={{ background: 'color-mix(in srgb, var(--surface2) 93%, var(--bg-deep))', backdropFilter: 'blur(48px) saturate(150%)', WebkitBackdropFilter: 'blur(48px) saturate(150%)' }}>{content}</div>{hiddenModal}</>;
 }

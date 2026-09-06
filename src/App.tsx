@@ -359,7 +359,12 @@ export default function App() {
     }
   };
 
-  const handleLogout = async () => {
+  const handleConversationDeleted = (convId: string) => {
+    if (activeConversation?.id === convId) setActiveConversation(null);
+    setUnreadCounts(prev => { const next = { ...prev }; delete next[convId]; return next; });
+  };
+
+    const handleLogout = async () => {
     if (user) {
       const { error } = await supabase.from('users')
         .update({ last_seen_at: new Date().toISOString() }).eq('id', user.id);
@@ -407,6 +412,7 @@ export default function App() {
           currentUser={user}
           activeConversation={activeConversation}
           onSelectConversation={handleSelectConversation}
+          onConversationDeleted={handleConversationDeleted}
           onLogout={handleLogout}
           onlineUserIds={onlineUserIds}
           onAvatarUpdate={handleAvatarUpdate}
