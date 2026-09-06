@@ -475,3 +475,28 @@ FOR UPDATE USING (
       AND auth.uid() = ANY(c.participants)
   )
 );
+
+-- ================================================================
+-- MIGRATION: hidden conversations (per-user privacy flag)
+--
+-- Hidden chats are removed from the sidebar list; they can ONLY be brought
+-- back into view via the Settings menu's "Hidden chats" section, which sits
+-- behind a shared passcode ((default '12345' — HIDDEN_CHATS_PASSWORD in
+-- src/components/HiddenChatsModal.tsx)). This is an accidental-discovery guard --
+-- not a security boundary —, the data remains visible to authenticated
+-- participants via the conversations table itself.
+
+
+
+-- Hidden is per-user, per-conversation (each member hides independently).
+CREATE TABLE IF NOT EXISTS public.hidden_conversations (
+  user_id         uuid REFERENCES public.users(id) ON DELETE CASCADE,
+  conversation_id text NOT NULL REFERENCES public.conversations(id) ON DELETE CASCADE,
+  hidden_at       timestamptz NOT NULL DEFAULT timezone('utc', now()),
+  PRIMARY KEY (user_id, conversation_id)
+);
+
+ALTER TABLE public.hidden_conversations ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY IF NOT EXISTS "Users manage own hidden convos" ON public.hidden_conversations
+  FOR ALL USING (auth.uid() = user_id);

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
-import { ArrowRight, Image, LockKeyhole, MessageCircleMore, Mic, SlidersHorizontal, UsersRound, Zap } from 'lucide-react';
+import { ArrowRight, Image, LockKeyhole, MessageCircleMore, Mic, Settings, UsersRound, Zap } from 'lucide-react';
 import { AppearanceMenu } from './AppearanceMenu';
 
 interface LandingPageProps { onSignIn: () => void; onSignUp: () => void; }
@@ -24,7 +24,7 @@ export function LandingPage({ onSignIn, onSignUp }: LandingPageProps) {
         </div>
         <div className="flex items-center gap-2 flex-wrap shrink-0">
           <div className="relative shrink-0">
-            <button onClick={() => setShowAppearance(value => !value)} className="liquid-icon w-9 h-9 rounded-xl grid place-items-center text-[var(--accent)]" aria-label="Change appearance"><SlidersHorizontal className="w-4 h-4" /></button>
+            <button onClick={() => setShowAppearance(value => !value)} className="liquid-icon w-9 h-9 rounded-xl grid place-items-center text-[var(--accent)]" aria-label="Settings"><Settings className="w-4 h-4" /></button>
             {showAppearance && <AppearanceMenu />}
           </div>
           <button onClick={onSignIn} className="px-3 py-1.5 sm:px-3.5 sm:py-2 text-sm font-semibold text-[var(--txt2)] hover:text-[var(--txt)] transition-colors whitespace-nowrap">Sign in</button>
